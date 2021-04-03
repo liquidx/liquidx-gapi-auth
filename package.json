@@ -1,0 +1,14 @@
+{
+  "name": "liquidx-gapi",
+  "version": "1.0.0",
+  "description": "Library and Commandline Tools for accessing Google OAuth2 APIs from Cloud Functions and the Command Line",
+  "main": "index.js",
+  "scripts": {},
+  "author": "alastair@liquidx.net",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^7.2.0",
+    "googleapis": "^70.0.0",
+    "googlephotos": "^0.3.4"
+  }
+}
