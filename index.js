@@ -1,64 +1,60 @@
-const { authenticatedClient } = require('./auth')
-const { FileStorage } = require('./auth-file-storage')
-const { listPhotos } = require('./photoslibrary')
-const { program } = require('commander');
-const { google } = require("googleapis");
-const process = require('process');
+const fs = require('fs');
+const { google } = require('googleapis');
 
-// If modifying these scopes, delete token.json.
-const SCOPES = [
-  'https://www.googleapis.com/auth/photoslibrary.readonly',
-  'https://www.googleapis.com/auth/calendar.readonly'];
+class FileTokenStorage {
+  constructor(filename) {
+    this.tokenFilename = filename;
+  }
 
+  readToken() {
+    return fs.promises.readFile(this.tokenFilename).then((body) => JSON.parse(body));
+  }
 
-/**
- * Lists the next 10 events on the user's primary calendar.
- * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
- */
- function listEvents(auth) {
-  const calendar = google.calendar({version: 'v3', auth});
-  calendar.events.list({
-    calendarId: 'primary',
-    timeMin: (new Date()).toISOString(),
-    maxResults: 10,
-    singleEvents: true,
-    orderBy: 'startTime',
-  }, (err, res) => {
-    if (err) return console.log('The API returned an error: ' + err);
-    const events = res.data.items;
-    if (events.length) {
-      console.log('Upcoming 10 events:');
-      events.map((event, i) => {
-        const start = event.start.dateTime || event.start.date;
-        console.log(`${start} - ${event.summary}`);
-      });
-    } else {
-      console.log('No upcoming events found.');
-    }
-  });
+  writeToken(token) {
+    return fs.promises.writeFile(this.tokenFilename, JSON.stringify(token));
+  }
 }
 
+const authenticatedClient = (credentialsFile, clientScopes, storage, authCode) => {
+  // Load client secrets from a local file.
+  return fs.promises
+    .readFile(credentialsFile)
+    .then((content) => {
+      return JSON.parse(content);
+    })
+    .then((credentials) => {
+      const { client_secret, client_id, redirect_uris } = credentials.installed;
+      const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
 
-program.option('-a, --auth-code <auth>', 'Auth code from server.')
-program.parse(process.argv)
-const options = program.opts();
+      return storage
+        .readToken()
+        .then((token) => {
+          // TODO: Check scopes == clientScopes before reusing this.
+          oAuth2Client.setCredentials(token);
+          return { client: oAuth2Client };
+        })
+        .catch((err) => {
+          console.log(authCode);
+          if (authCode) {
+            // Supply the auth code and get the token.
+            return oAuth2Client.getToken(authCode).then(({ tokens }) => {
+              storage.writeToken(tokens);
+              oAuth2Client.setCredentials(tokens);
+              return { client: oAuth2Client };
+            });
+          } else {
+            // return the URL
+            const authUrl = oAuth2Client.generateAuthUrl({
+              access_type: 'offline',
+              scope: clientScopes,
+            });
+            return { client: oAuth2Client, authUrl: authUrl };
+          }
+        });
+    });
+};
 
-const storage = new FileStorage('token.json')
-
-authenticatedClient(SCOPES, storage, options.authCode).then(response => {
-  if (response.authUrl) {
-    console.log('Open URL: ', response.authUrl)
-    console.log('Run: node index.js --auth-code <code>')
-    return
-  } else {
-    listEvents(response.client)
-
-    storage.readToken()
-      .then(tokens => {
-        return listPhotos(tokens.access_token)
-      })
-      .then(response => {
-        console.log(response)
-      })
-  }
-})
+module.exports = {
+  authenticatedClient,
+  FileTokenStorage,
+};
